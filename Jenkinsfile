@@ -102,8 +102,9 @@ pipeline {
             steps {
                 script {
                     sh """
-                        kubectl apply -f deployment.yaml -n ${KUBERNETES_NAMESPACE}
-                        kubectl apply -f service.yaml -n ${KUBERNETES_NAMESPACE}
+
+                        kubectl apply -f k8s/deployment.yaml -n ${KUBERNETES_NAMESPACE}
+                        kubectl apply -f k8s/service.yaml -n ${KUBERNETES_NAMESPACE}
                         kubectl rollout status deployment/devsecops-flask-app -n ${KUBERNETES_NAMESPACE}
                     """
                 }
