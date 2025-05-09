@@ -41,3 +41,84 @@ pipeline {
             steps {
                 withSonarQubeEnv('MySonarQube') {
                     withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_AUTH_TOKEN')]) {
+                        sh """
+                            sonar-scanner \
+                            -Dsonar.projectKey=DevSecOps-Flask-App \
+                            -Dsonar.sources=. \
+                            -Dsonar.host.url=\${SONAR_HOST_URL} \
+                            -Dsonar.login=\${SONAR_AUTH_TOKEN} \
+                            -Dsonar.connectionTimeout=60000 \
+                            -Dsonar.socketTimeout=60000
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${DOCKER_IMAGE_NAME} ."
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                script {
+                    try {
+                        sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${DOCKER_IMAGE_NAME}"
+                        echo "No critical vulnerabilities found"
+                    } catch (Exception e) {
+                        error "Trivy scan failed due to critical vulnerabilities"
+                    }
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-credentials', 
+                    usernameVariable: 'DOCKER_USER', 
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                        docker login -u $DOCKER_USER -p $DOCKER_PASS
+                        docker tag ${DOCKER_IMAGE_NAME}:latest ${DOCKER_HUB_REPO}:latest
+                        docker push ${DOCKER_HUB_REPO}:latest
+                        docker logout
+                    """
+                }
+            }
+        }
+
+        stage('Manual Approval') {
+            steps {
+                input message: 'Approve deployment to EKS?'
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                script {
+                    sh """
+                        aws eks --region us-east-1 update-kubeconfig --name ${KUBERNETES_CLUSTER_NAME}
+                        kubectl apply -f deployment.yaml -n ${KUBERNETES_NAMESPACE}
+                        kubectl apply -f service.yaml -n ${KUBERNETES_NAMESPACE}
+                        kubectl rollout status deployment/devsecops-flask-app -n ${KUBERNETES_NAMESPACE}
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+            script {
+                def status = currentBuild.result ?: 'SUCCESS'
+                def color = status == 'SUCCESS' ? 'good' : 'danger'
+                slackSend(color: color, message: "Pipeline ${status}: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
+            }
+        }
+    }
+}
