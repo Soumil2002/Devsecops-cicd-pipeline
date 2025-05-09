@@ -112,14 +112,4 @@ pipeline {
         }
     }
 
-    post {
-        always {
-            cleanWs()
-            script {
-                def status = currentBuild.result ?: 'SUCCESS'
-                def color = status == 'SUCCESS' ? 'good' : 'danger'
-                slackSend(color: color, message: "Pipeline ${status}: ${env.JOB_NAME} #${env.BUILD_NUMBER}")
-            }
-        }
-    }
 }
