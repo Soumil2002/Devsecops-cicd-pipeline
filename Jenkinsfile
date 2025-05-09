@@ -2,8 +2,11 @@ pipeline {
     agent any
 
     environment {
-        // SonarQube configuration (no need for tools block with newer plugin)
-        SONAR_SCANNER_OPTS = "-Dsonar.projectName=DevSecOps-Flask-App"
+        // SonarQube configuration
+        SONAR_SCANNER_HOME = tool name: 'sonar-scanner', type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+        PATH = "${env.SONAR_SCANNER_HOME}/bin:${env.PATH}"
+        
+        // Other environment variables
         DOCKER_IMAGE_NAME = 'devsecops-flask-app'
         DOCKER_HUB_REPO = 'soumil22/devsecops-flask-app'
         KUBERNETES_CLUSTER_NAME = 'devsecops-cluster'
@@ -14,8 +17,11 @@ pipeline {
         // Stage 1: Checkout Code from GitHub
         stage('Checkout') {
             steps {
-                git branch: 'main', 
-                url: 'https://github.com/Soumil2002/Devsecops-cicd-pipeline.git'
+                checkout([$class: 'GitSCM', 
+                         branches: [[name: '*/main']],
+                         extensions: [], 
+                         userRemoteConfigs: [[url: 'https://github.com/Soumil2002/Devsecops-cicd-pipeline.git']]
+                        ])
             }
         }
 
@@ -23,12 +29,13 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('MySonarQube') {
-                    // Using the default sonar-scanner from the plugin
-                    sh 'sonar-scanner \
+                    sh """
+                        sonar-scanner \
                         -Dsonar.projectKey=DevSecOps-Flask-App \
                         -Dsonar.sources=. \
-                        -Dsonar.host.url=${SONAR_HOST_URL} \
-                        -Dsonar.login=${SONAR_AUTH_TOKEN}'
+                        -Dsonar.host.url=\${SONAR_HOST_URL} \
+                        -Dsonar.login=\${SONAR_AUTH_TOKEN}
+                    """
                 }
             }
         }
@@ -47,7 +54,7 @@ pipeline {
             steps {
                 script {
                     // Exit if critical vulnerabilities found
-                    sh 'trivy image --exit-code 1 --severity HIGH,CRITICAL ${DOCKER_IMAGE_NAME}'
+                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${DOCKER_IMAGE_NAME}"
                 }
             }
         }
@@ -61,9 +68,11 @@ pipeline {
                         usernameVariable: 'DOCKER_USER', 
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
-                        sh "docker login -u $DOCKER_USER -p $DOCKER_PASS"
-                        sh "docker tag ${DOCKER_IMAGE_NAME}:latest ${DOCKER_HUB_REPO}:latest"
-                        sh "docker push ${DOCKER_HUB_REPO}:latest"
+                        sh """
+                            docker login -u $DOCKER_USER -p $DOCKER_PASS
+                            docker tag ${DOCKER_IMAGE_NAME}:latest ${DOCKER_HUB_REPO}:latest
+                            docker push ${DOCKER_HUB_REPO}:latest
+                        """
                     }
                 }
             }
@@ -73,15 +82,12 @@ pipeline {
         stage('Deploy to EKS') {
             steps {
                 script {
-                    // Configure kubectl to use the right context
-                    sh "kubectl config use-context ${KUBERNETES_CLUSTER_NAME}"
-                    
-                    // Apply Kubernetes manifests
-                    sh "kubectl apply -f deployment.yaml -n ${KUBERNETES_NAMESPACE}"
-                    sh "kubectl apply -f service.yaml -n ${KUBERNETES_NAMESPACE}"
-                    
-                    // Verify deployment
-                    sh "kubectl rollout status deployment/devsecops-flask-app -n ${KUBERNETES_NAMESPACE}"
+                    sh """
+                        kubectl config use-context ${KUBERNETES_CLUSTER_NAME}
+                        kubectl apply -f deployment.yaml -n ${KUBERNETES_NAMESPACE}
+                        kubectl apply -f service.yaml -n ${KUBERNETES_NAMESPACE}
+                        kubectl rollout status deployment/devsecops-flask-app -n ${KUBERNETES_NAMESPACE}
+                    """
                 }
             }
         }
@@ -89,17 +95,7 @@ pipeline {
 
     post {
         always {
-            // Clean up workspace
             cleanWs()
-            
-            // Send notifications (you'll need to configure email/chat plugins)
-            script {
-                if (currentBuild.result == 'SUCCESS') {
-                    // Success notification
-                } else {
-                    // Failure notification
-                }
-            }
         }
     }
 }
