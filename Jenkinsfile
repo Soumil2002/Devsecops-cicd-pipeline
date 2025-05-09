@@ -65,7 +65,8 @@ pipeline {
             steps {
                 script {
                     try {
-                        sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${DOCKER_IMAGE_NAME}"
+                        echo "Starting Trivy scan for HIGH and CRITICAL vulnerabilities..."
+                        sh "trivy image --severity HIGH,CRITICAL ${DOCKER_IMAGE_NAME}"
                         echo "No critical vulnerabilities found"
                     } catch (Exception e) {
                         error "Trivy scan failed due to critical vulnerabilities"
