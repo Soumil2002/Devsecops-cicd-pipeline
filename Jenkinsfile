@@ -1,12 +1,9 @@
 pipeline {
     agent any
 
-    tools {
-        sonarQubeScanner 'SonarScanner'  
-    }
-
     environment {
-        SCANNER_HOME = tool 'SonarScanner'
+        // SonarQube configuration (no need for tools block with newer plugin)
+        SONAR_SCANNER_OPTS = "-Dsonar.projectName=DevSecOps-Flask-App"
         DOCKER_IMAGE_NAME = 'devsecops-flask-app'
         DOCKER_HUB_REPO = 'soumil22/devsecops-flask-app'
         KUBERNETES_CLUSTER_NAME = 'devsecops-cluster'
@@ -17,17 +14,21 @@ pipeline {
         // Stage 1: Checkout Code from GitHub
         stage('Checkout') {
             steps {
-                git 'https://github.com/Soumil2002/Devsecops-cicd-pipeline.git'
+                git branch: 'main', 
+                url: 'https://github.com/Soumil2002/Devsecops-cicd-pipeline.git'
             }
         }
 
         // Stage 2: Run SonarQube Code Analysis
         stage('SonarQube Analysis') {
             steps {
-                script {
-                    withSonarQubeEnv('MySonarQube') {
-                        sh "${SCANNER_HOME}/bin/sonar-scanner"
-                    }
+                withSonarQubeEnv('MySonarQube') {
+                    // Using the default sonar-scanner from the plugin
+                    sh 'sonar-scanner \
+                        -Dsonar.projectKey=DevSecOps-Flask-App \
+                        -Dsonar.sources=. \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.login=${SONAR_AUTH_TOKEN}'
                 }
             }
         }
@@ -36,7 +37,7 @@ pipeline {
         stage('Docker Build') {
             steps {
                 script {
-                    sh 'docker build -t ${DOCKER_IMAGE_NAME} .'
+                    sh "docker build -t ${DOCKER_IMAGE_NAME} ."
                 }
             }
         }
@@ -45,7 +46,8 @@ pipeline {
         stage('Trivy Scan') {
             steps {
                 script {
-                    sh 'trivy image --severity HIGH,CRITICAL ${DOCKER_IMAGE_NAME}'
+                    // Exit if critical vulnerabilities found
+                    sh 'trivy image --exit-code 1 --severity HIGH,CRITICAL ${DOCKER_IMAGE_NAME}'
                 }
             }
         }
@@ -54,16 +56,15 @@ pipeline {
         stage('Docker Push to Docker Hub') {
             steps {
                 script {
-                    // Login to Docker Hub using the credentials stored in Jenkins
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                        sh 'docker login -u $DOCKER_USER -p $DOCKER_PASS'
+                    withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub-credentials', 
+                        usernameVariable: 'DOCKER_USER', 
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        sh "docker login -u $DOCKER_USER -p $DOCKER_PASS"
+                        sh "docker tag ${DOCKER_IMAGE_NAME}:latest ${DOCKER_HUB_REPO}:latest"
+                        sh "docker push ${DOCKER_HUB_REPO}:latest"
                     }
-
-                    // Tag Docker image for Docker Hub
-                    sh 'docker tag ${DOCKER_IMAGE_NAME}:latest $DOCKER_HUB_REPO:latest'
-
-                    // Push the Docker image to Docker Hub
-                    sh 'docker push $DOCKER_HUB_REPO:latest'
                 }
             }
         }
@@ -72,9 +73,15 @@ pipeline {
         stage('Deploy to EKS') {
             steps {
                 script {
-                    // Apply Kubernetes manifests to EKS (Deployment and Service YAML)
-                    sh 'kubectl apply -f deployment.yaml --namespace=$KUBERNETES_NAMESPACE'
-                    sh 'kubectl apply -f service.yaml --namespace=$KUBERNETES_NAMESPACE'
+                    // Configure kubectl to use the right context
+                    sh "kubectl config use-context ${KUBERNETES_CLUSTER_NAME}"
+                    
+                    // Apply Kubernetes manifests
+                    sh "kubectl apply -f deployment.yaml -n ${KUBERNETES_NAMESPACE}"
+                    sh "kubectl apply -f service.yaml -n ${KUBERNETES_NAMESPACE}"
+                    
+                    // Verify deployment
+                    sh "kubectl rollout status deployment/devsecops-flask-app -n ${KUBERNETES_NAMESPACE}"
                 }
             }
         }
@@ -82,16 +89,17 @@ pipeline {
 
     post {
         always {
-            // Archive the SonarQube analysis results or logs if necessary
-            archiveArtifacts artifacts: '**/sonar-report.json', allowEmptyArchive: true
-        }
-
-        success {
-            echo 'Pipeline finished successfully!'
-        }
-
-        failure {
-            echo 'Pipeline failed!'
+            // Clean up workspace
+            cleanWs()
+            
+            // Send notifications (you'll need to configure email/chat plugins)
+            script {
+                if (currentBuild.result == 'SUCCESS') {
+                    // Success notification
+                } else {
+                    // Failure notification
+                }
+            }
         }
     }
 }
