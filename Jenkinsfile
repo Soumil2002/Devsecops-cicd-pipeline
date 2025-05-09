@@ -102,7 +102,6 @@ pipeline {
             steps {
                 script {
                     sh """
-                        aws eks --region us-east-1 update-kubeconfig --name ${KUBERNETES_CLUSTER_NAME}
                         kubectl apply -f deployment.yaml -n ${KUBERNETES_NAMESPACE}
                         kubectl apply -f service.yaml -n ${KUBERNETES_NAMESPACE}
                         kubectl rollout status deployment/devsecops-flask-app -n ${KUBERNETES_NAMESPACE}
